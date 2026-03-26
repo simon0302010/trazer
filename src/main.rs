@@ -1,41 +1,37 @@
-use std::{io::Error, net::IpAddr, sync::mpsc, thread, time::{Duration, Instant}};
+use shumate::{MapLayer, MapSourceRegistry, prelude::*};
 
-use sync_resolve;
-use traceroute;
+use shumate::{Map};
+use gtk::{Application, ApplicationWindow, glib};
 
-fn main() {
-    let ip = sync_resolve::resolve_host("tu.berlin")
-        .and_then(|r| {
-            r.collect::<Vec<IpAddr>>()
-                .first()
-                .ok_or(Error::new(
-                    std::io::ErrorKind::NotFound,
-                    "Couldn't find address",
-                ))
-                .map(|a| *a)
-        })
-        .expect("Failed to resolve host");
+mod trace;
 
-    println!("target ip: {}", ip);
+fn main() -> glib::ExitCode {
+    let app = Application::builder()
+        .application_id("de.simon0302010.trazer")
+        .build();
 
-    let res = traceroute::execute(format!("{}:0", ip));
-    if let Err(e) = res {
-        eprintln!("error while tracing: {}", e);
-        return;
-    }
+    app.connect_activate(|app| {
+        let map = Map::new();
+        let viewport = map.viewport().expect("Failed to get map viewport");
 
-    let (trace_tx, trace_rx) = mpsc::channel();
+        let registry = MapSourceRegistry::new();
+        registry.populate_defaults();
 
-    let _ = thread::spawn(move || {
-        for hop in res.unwrap() {
-            let _ = trace_tx.send(hop);
-        }
+        let source = registry.by_id(shumate::MAP_SOURCE_OSM_MAPNIK).expect("Failed to find map source");
+
+        map.set_map_source(&source);
+        map.add_layer(&MapLayer::new(&source, &viewport));
+
+        viewport.set_zoom_level(3.0);
+
+        let window = ApplicationWindow::builder()
+            .application(app)
+            .default_width(400)
+            .child(&map)
+            .build();
+
+        window.show();
     });
 
-    loop {
-        match trace_rx.recv_timeout(Duration::from_secs(5)) {
-            Ok(item) => println!("{:?}", item),
-            Err(_) => break
-        }
-    }
+    app.run()
 }
